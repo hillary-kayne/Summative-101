@@ -1,0 +1,254 @@
+|<!DOCTYPE html>
+<html lang=""en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width-device-width, initial-scale=1">
+  <title>Yellow cab trips in New York City</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?familly=Overpass:wght@400;600;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css"
+   # Chart.js draws the charts. It loads from a CDN, so the dashboard needs internet access. -->
+  <script src="https://cdnjs.clouflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js" defer></script>
+  <script type="module" src="js/main.js"></script>
+</head>
+<body>
+
+<header class="roof">
+    <div class="roof-title">
+        <h1>Yellow cab trips in New York City</h1>
+        <p id="period">Loading the data...</p>
+    </div>
+    <dl class="meter" id="kpis">
+        <div><dt>Trips</dt><dd id="kpi-trips">-</dd></div>
+        <div><dt>Average fare</dt><dd id="kpi-fare">-</dd></div>
+        <div><dt>Average distance</dt><dd id="kpi-distance">-</dd></div>
+        <div><dt>Average ride time</dt><dd id="kpi-duration">-</dd></div>
+        <div><dt>Average card tip</dt><dd id="kpi-tip">-</dd></div>
+    </dl>
+    <div class="checker" aria-hidden="true"></div>
+</header>
+
+<div id="banner" class="banner" role="alert" hidden></div>
+
+<div class="layout">
+  
+    <!-- FILTERS -->
+     <aside class="filters" aria-label="Filters">
+        <form id="filters" autocomplete="off">
+            <h2>Filter the trips</h2>
+            <p id="filter-count" class="muted">No filters on. Showing every trip.</p>
+
+            <fieldset>
+                <legend>Pickup date</legend>
+                <label>From <input type="date" name="date_from"></label>
+                <label>To <input type="date" name="date_to"></label>
+            </fieldset>
+
+            <fieldset>
+                <legend> Pickup time of day</legend>
+                <label>At least <input type="number" name="dist_min" min="0" step="0.5" inputmode="decimal"></label>
+                <label>At most <input type="number" name="dist_max" min="0" step="0.5" inputmode="decimal"></label>
+                <p class="muted hint">Hours include the whole hour, so 5pm covers 5:00-5:59 PM.</p>
+            </fieldset>
+
+            <fieldset>
+                <legend>Distance in miles</legend>
+                <label>At least <input type="number" name="dist_min" min="0" step="0.5" inputmode="decimal"></label>
+                <label>At most <input type="number" name="dist_max" min="0" step="0.5" inputmode="decimal"></label>
+            </fieldset>
+
+            <fieldset>
+                <legend>Total paid in dollars</legend>
+                <label>At least <input type="number" name="fare_min" min="0" step="1" inputmode="decimal"></label>
+                <label>At most <input type="number" name="fare_max" min="0" step="1" inputmode="decimal"></label>
+            </fieldset>
+
+            <fieldset>
+                <legend>Where the trip starts and ends</legend>
+                <label>Pickup borough <select name="pu_borough"></select></label>
+                <label>Pickup zone <select name="pu_zone"></select></label>
+                <label>Dropoff zone <select name="do_zone"></select></label>
+            </fieldset>
+
+            <fieldset>
+                <legend>Other</legend>
+                <label>Payment <select name="payment"></select></label>
+                <label>Days
+                    <select name="daytype">
+                        <option value="">Every day</option>
+                        <option value="weekday">Weekdays only</option>
+                        <option value="weekend">Weekends only</option>
+                    </select>
+                </label>
+                <label class="check"><input type="checkbox" name="airport" value="1"> Airport trips only</label>
+            </fieldset>
+
+            <button type="button" id="reset" class="plain">Clear all filters</button>
+        </form>
+     </aside>
+
+     <main id="main">
+
+        <!--        MAP        -->
+        <section class="panel" aria-labelledby="map-title">
+            <div class="panel-head">
+                <div>
+                    <h2 id="map-title">Where the trips start</h2>
+                    <p class="muted">Each zone is shaded by the number you pick. Click a zone to see only the trips that startthere.</p>
+                </div>
+                <div class="segmented" role="group" aria-label="Number shown on the map" id="metric-buttons">
+                    <button type="button" data-metric="trips" aria-pressed="true">Pickups</button>
+                    <button type="button" data-metric="avg_total" aria-pressed="false">Average fare</button>
+                    <button type="button" data-metric="avg_tip_pct" aria-pressed="false">Average tip</button>
+                    <button type="button" data-metric="avg_distance" aria-pressed="false">Average distance</button>
+                </div>
+            </div>
+
+            <div class="map-grid">
+                <div class="map-wrap">
+                    <svg id="map" viewbox="0 0 700 600" role="img"
+                        aria-label="Map of New York taxi zones shaded by the selected number. For keyboard use, pick a zone in the filter panel or from the ranked list."></svg>
+                    <div id="tooltip" class="tooltip" hidden></div>
+                    <p id="empty-note" class="empty" hidden>No trips match these filters. Widen the data range or clear a filter.</p>
+                    <div class="legend" aria-hidden="true">
+                        <span id="legend-min"></span>
+                        <span class="ramp"></span>
+                        <span id="legend-max"></span>
+                    </div>
+                </div>
+
+                <div class="rank">
+                    <h3 id="zones-title">Top pickup zones</h3>
+                    <p id="zones-note" class="muted"></p>
+                    <ol id="top-zones" class="ranked"></ol>
+                </div>
+            </div>
+        </section>
+
+        <!--        CHARTS        -->
+        <section class="panel" aria-labelledby="charts-title">
+            <h2 id="time-title">When people ride</h2>
+            <div class="chart-grid two">
+                <figure>
+                    <figcaption>Trips and speed by hour of day
+                        <span class="muted">Bars count trips that start in each hour. The line is the average speed of those trips.</span>
+                    </figcaption>
+                    <div class="chart-box"><canvas id="chart-hourly" role="img" aria-label="Barand line chart of trips and average speed by hour"></canvas></div>
+                </figure>
+                <figure>
+                    <figcaption>Trips per day 
+                        <span class="muted">Every day in the selected date range.</span>
+                    </figcaption>
+                    <div class="chart-box"><canvas id="chart-daily" role="img" aria-label="Line chart of trips per day"></canvas></div>
+                </figure>
+            </div>
+            <div class="chart-grid three">
+                <figure>
+                    <figcaption>Trips by day of the week
+                        <span class="muted">Weekend days are orange.</span>
+                    </figcaption>
+                    <div class="chart-box"><canvas id="chart-weekday" role="img" aria-label="Bar chart of trips by day of the week"></canvas></div>
+                </figure>
+                <figure>
+                    <figcaption>How far people ride
+                        <span class="muted">Trips grouped by distance.</span>
+                    </figcaption>
+                    <div class="chart-box"><canvas id="chart-distance" role="img" aria-label="Bar chart of trips by distance band"></canvas></div>
+                </figure>
+                <figure>
+                    <figcaption>How people pay
+                        <span class="muted">Trips by payment type.</span>
+                    </figcaption>
+                    <div class="chart-box"><canvas id="chart-payment" role="img" aria-label="Bar chart of trips by payment type"></canvas></div>
+                </figure>
+            </div>
+        </section>
+
+        <!--        ROUTES AND STANDOUTS        -->
+        <section class="panel two-col" aria-label="Busiest routes and standout trips">
+            <div>
+                <h2>Busiest routes</h2>
+                <p class="muted">The pickup and dropoff pairs with the most trips. Click one to filter to it.</p>
+                <ol id="top-routes" class="ranked"></ol>
+            </div>
+            <div>
+                <h2>Standout trips</h2>
+                <label class="inline">Rank trips by 
+                    <select id="top-trip-metric">
+                        <option value="trip_distance">Longest distance</option>
+                        <option value="total_amount">Highest total paid</option>
+                        <option value="trip_duration_min">Longest ride time</option>
+                        <option value="tip_pct">Highest tip percentage</option>
+                        <option value="avg_speed_mph">Fastest average speed</option>
+                        <option value="fare_per_mile">Highest fare per mile</option>
+                    </select>
+                </label>
+                <p id="top-trips-note" class="muted"></p>
+                <ol id="top-trips" class="ranked"></ol>
+            </div>
+        </section>
+
+        <!--        TABLE         -->
+        <section class="panel" aria-labelledby="table-title">
+            <div class="panel-head">
+                <div>
+                    <h2 id="table-title">All matching trips</h2>
+                    <p class="muted" id="table-count"></p>
+                </div>
+                <label class="inline">Rows per page
+                    <select id="page-size">
+                        <option>25</option><option>50</option><option>100</option>
+                    </select>
+                </label>
+            </div>
+            <div class="table-scroll">
+                <table id="trips-table">
+                    <thead>
+                        <tr>
+                            <th scope="col"><button type="button" data-sort="pickup_datetime">Pickup time</button></th>
+                            <th scope="col">From</th>
+                            <th scope="col">To</th>
+                            <th scope="col" class="num"><button type="button" data-sort="trip_distance">Miles</button></th>
+                            <th scope="col" class="num"><button type="button" data-sort="trip_duration_min">Minutes</button></th>
+                            <th scope="col" class="num"><button type="button" data-sort="avg_speed_mph">Speed (mph)</button></th>
+                            <th scope="col" class="num"><button type="button" data-sort="tip_pct">Tip</button></th>
+                            <th scope="col" class="num"><button type="button" data-sort="total_amount">Total paid</button></th>
+                        </tr>
+                    </thead>
+                    <tbody></tbody>
+                </table>
+            </div>
+            <nav class="pager" aria-label="Pages of trips">
+                <button type="button" id="prev" class="plain">Previous page</button>
+                <span id="page-info"></span>
+                <button type="button" id="next" class="plain">Next page</button>
+            </nav>
+        </section>
+        
+        <!--        DATA QUALITY        -->
+        <section class="panel">
+            <details>
+                <summary><h2>What the cleaning step removed</h2></summary>
+                <p class="muted">Raw taxi data contains mistakes.These trips were taken out, or repaired, before they reached the database.</p>
+                <table id="quality-table">
+                    <thead><tr><th scope="col">Reason</th><th scope="col" class="num">Trips</th><th scope="col" class="num">Share of raw data</th></tr></thead>
+                    <tbody></tbody>
+                </table>
+            </details>
+        </section>
+
+        <footer class="foot muted">Source: NYC Taxi and Limousine Commission yellow taxi trip records.</footer>
+     </main>
+</div>
+
+<!--        TRIP DETAIL DRAWER        -->
+<aside id="drawer" class="drawer" role="dialog" aria-modal="false" aria-labelledby="drawer-title" hidden>
+    <button type="button" id="drawer-close" class="plain">Close</button>
+    <h2 id="drawer-title"></h2>
+    <p id="drawer-subtitle" class="muted"></p>
+    <div id="drawer-body"></div>
+</aside>
+
+</body>
+</html>
