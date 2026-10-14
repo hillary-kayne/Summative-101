@@ -1,18 +1,3 @@
--- schema.sql  (Person B)
--- Normalized SQLite schema for the NYC taxi project. 
---
---  boroughs ─┐
---             ├─< zones >─┐
---   service_zones ─┘      │  (pickup zone and dropoff zone)
---                         ├─< trips >── vendors, rate_codes, payment_types
---   exclusion_summary     (stand-alone data-quality table)
---
--- Why this shape:
---   * Names(borough, zone, payment type...) live in small lookup tables, so they are stored once, 
---     not repeated millions of times in the trips table. 
---   * trips keeps the derived features (speed, tip %, hour ...) as real columns. That duplicates
---     information that could be recalculated, but it makes the dashboard queries and indexes fast. 
-
 PRAGMA foreign_keys = ON;
 
 DROP TABLE IF EXISTS trips;

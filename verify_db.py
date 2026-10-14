@@ -1,18 +1,3 @@
-"""
-verify_db.py  (Person B)
-Checks that the database is healthy, Run it after load_db.py.
-
-It proves for things (and prints PASS or FAIL for each check are clean):
-  1. every table ha data 
-  2. foreign keys and the SQLite integrity check are clean
-  3. the main dashboard queries actually USE an index (no full-table scans)
-  4. the constraints really reject bad data (the report can qupte these)
-
-Usage: 
-    python database/verify_db.py
-    pyhton database/verify_db.py --db some/other/path.db
-    """
-
 import argparse
 import sqlite3
 import sys 
@@ -22,7 +7,7 @@ DEFAULT_DB =Path(__file__).resolve().parent / "nyc_taxi.db"
 results = []
 
 
-def check(name, ok, detail="")
+def check(name, ok, detail=""):
     ok = bool(ok)
     results.append(ok)
     print(f"  [{'PASS' if ok else 'FAIL'}] {name}" + (f"  ({detail})" if detail else ""))
@@ -71,8 +56,8 @@ def main(db_path):
     cases = {
         "negative fare is rejected": {"fare_amount": -5},
         "zero distance is rejected": {"trip_distance": 0},
-        "dropoff before pickup is rejected": {"dropoff_datetime": "2000-01-01 00:00:00"}
-        "pickup hour 25 is rejected": {pickup_hour": 25},
+        "dropoff before pickup is rejected": {"dropoff_datetime": "2000-01-01 00:00:00"},
+        "pickup hour 25 is rejected": {"pickup_hour": 25},
         "unkwown zone id is rejected (foreign key)": {"pu_location_id": 99999}, 
         "unknown payment type is rejected (foreign key)": {"payment_type_id":99999},
     } 
