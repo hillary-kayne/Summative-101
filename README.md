@@ -12,6 +12,7 @@ The data comes from the NYC Taxi & Limousine Commission (TLC) Yellow Taxi trip r
 | Hillary Kayinababo | Database | Schema design, loading and verifying the SQLite database |
 | Sonia Keza Gendaneza | Backend | Flask API and the top-K algorithm |
 | Elsie Glenna Ineza | Frontend | The interactive dashboard |
+Team task sheet: https://docs.google.com/spreadsheets/d/16av-Zpefs4udbdqLACQPTo6-7nepp_k7o-vtTDcg5k0/edit?gid=0#gid=0
 
 ## How it works
 
@@ -35,6 +36,7 @@ Summative-101/
 │   └── test_api.py             Automated API checks
 ├── Database/
 │   ├── schema.sql              Table definitions, constraints and indexes
+│   ├── insight_report.py       Helps in finding the insights
 │   ├── load_db.py              Builds nyc_taxi.db from data/processed/
 │   ├── verify_db.py            Health checks for the database
 │   └── insight_queries.sql     SQL queries behind the data insights
@@ -72,7 +74,9 @@ cd Summative-101
 ### 2. Install the dependencies
 
 ```
-python -m pip install -r requirements.txt
+python -m venv .venv             # for setting up the environment
+.\.venv\Scripts\Activate.ps1
+pip install -r requirements.txt
 ```
 
 This installs Flask, pandas, pyarrow, pyshp and pyproj.
@@ -107,7 +111,7 @@ Open **http://127.0.0.1:5000** in your browser. The Flask server serves the dash
 The cleaned data is already included in `data/processed/`, so you do not need this step to run the project. To regenerate it from a raw trips file:
 
 ```
-python pipeline/clean_data.py --trips path/to/yellow_tripdata.parquet
+python pipeline/clean_data.py --trips path/to/yellow_tripdata.csv
 ```
 
 Optional arguments:
@@ -252,7 +256,9 @@ Features:
 | Port 5000 is already in use | Start on another port. In PowerShell: `$env:PORT=5001; python Backend/app.py` |
 | Dashboard shows an error banner | Make sure the server is running and the database has been built |
 
-Demo video: 
+# Demo video:
+# Documentation: 
+
 
 ## Data sources
 
