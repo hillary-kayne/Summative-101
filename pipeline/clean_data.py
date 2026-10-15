@@ -3,22 +3,28 @@ import io
 import json
 import zipfile
 from pathlib import Path
-
+ 
 import numpy as np
 import pandas as pd
-
+ 
 ROOT = Path(__file__).resolve().parent.parent
 RAW = ROOT / "data" / "raw"
 OUT = ROOT / "data" / "processed"
+ 
+# ----------------------------------------------------------------------------
+# Cleaning thresholds. Change them here and the whole pipeline follows.
+# Each one needs a one-line justification in the report.
+# ----------------------------------------------------------------------------
 LIMITS = {
-    "min_duration_min": 1,     
-    "max_duration_min": 360,  
-    "max_distance_mi": 100,   
-    "max_fare": 500,          
-    "max_speed_mph": 80,       
-    "max_passengers": 6,       
+    "min_duration_min": 1,     # a taxi trip under a minute is a meter test or a cancelled ride
+    "max_duration_min": 360,   # over 6 hours is almost certainly a meter left running
+    "max_distance_mi": 100,    # NYC is ~35 miles across; 100+ is a GPS or meter error
+    "max_fare": 500,           # fares this high are errors for a metered city taxi
+    "max_speed_mph": 80,       # faster than any legal NYC road speed
+    "max_passengers": 6,       # a yellow cab seats up to 5-6 people
 }
-
+ 
+# Raw TLC column name (lower-cased) -> our clean column name
 RENAME = {
     "vendorid": "vendor_id",
     "tpep_pickup_datetime": "pickup_datetime",
@@ -47,7 +53,7 @@ FEES = ["extra", "mta_tax", "tip_amount", "tolls_amount", "improvement_surcharge
         "congestion_surcharge", "airport_fee", "cbd_congestion_fee"]
 DUP_KEYS = ["vendor_id", "pickup_datetime", "dropoff_datetime", "pu_location_id",
             "do_location_id", "trip_distance", "total_amount"]
-
+ 
 FINAL_COLUMNS = [
     "trip_id", "vendor_id", "pickup_datetime", "dropoff_datetime", "pickup_date",
     "passenger_count", "trip_distance", "rate_code_id", "store_and_fwd_flag",
@@ -59,13 +65,17 @@ FINAL_COLUMNS = [
     "trip_duration_min", "avg_speed_mph", "fare_per_mile", "tip_pct",
     "pickup_hour", "pickup_dow", "is_weekend", "is_airport_trip", "is_cross_borough",
 ]
-
+ 
+ 
+# ----------------------------------------------------------------------------
+# Zones: lookup CSV + GeoJSON boundaries
+# ----------------------------------------------------------------------------
 def tidy_text(value):
     """Turn blanks and 'N/A' style placeholders into the single word 'Unknown'."""
     text = str(value).strip()
     return "Unknown" if text in ("", "N/A", "NA", "nan", "None") else text
-
-
+ 
+ 
 def load_lookup(path):
     # keep_default_na=False so the literal text "N/A" is not silently turned into NaN
     df = pd.read_csv(path, keep_default_na=False)
@@ -74,16 +84,18 @@ def load_lookup(path):
     df["location_id"] = df["location_id"].astype(int)
     for col in ("borough", "zone_name", "service_zone"):
         df[col] = df[col].map(tidy_text)
-    return df.drop_duplicates(subset="location_id").reset_index(drop=True)
+    return df.drop_duplicates("location_id").reset_index(drop=True)
+ 
+ 
 def _first_coord(coords):
     while isinstance(coords[0], (list, tuple)):
         coords = coords[0]
     return coords
-
-
-THIN_TOLERANCE = 0.0002 
-
-
+ 
+ 
+THIN_TOLERANCE = 0.0002   # degrees, about 20 metres: invisible on a map, but removes about half of the points
+ 
+ 
 def _thin_ring(points):
     """Drop points that sit almost on top of the previous one, so the map file stays small."""
     kept = [points[0]]
@@ -91,9 +103,9 @@ def _thin_ring(points):
         if abs(pt[0] - kept[-1][0]) >= THIN_TOLERANCE or abs(pt[1] - kept[-1][1]) >= THIN_TOLERANCE:
             kept.append(pt)
     kept.append(points[-1])
-    return kept if len(kept) >= 4 else points 
-
-
+    return kept if len(kept) >= 4 else points      # tiny islands keep every point
+ 
+ 
 def _convert_geometry(geom, fn):
     def ring(r):
         pts = []
@@ -101,12 +113,12 @@ def _convert_geometry(geom, fn):
             x, y = fn(coord[0], coord[1])
             pts.append([round(x, 5), round(y, 5)])
         return _thin_ring(pts)
-
+ 
     if geom["type"] == "Polygon":
         return {"type": "Polygon", "coordinates": [ring(r) for r in geom["coordinates"]]}
     return {"type": "MultiPolygon", "coordinates": [[ring(r) for r in poly] for poly in geom["coordinates"]]}
-
-
+ 
+ 
 def _read_shapefile(path):
     """Read the TLC shapefile (a .zip holding .shp/.shx/.dbf/.prj, or a bare .shp). Returns (features, crs_text)."""
     import shapefile                                   # the 'pyshp' package
@@ -126,14 +138,14 @@ def _read_shapefile(path):
     features = [{"properties": sr.record.as_dict(), "geometry": sr.shape.__geo_interface__}
                 for sr in reader.shapeRecords()]
     return features, crs_text
-
-
+ 
+ 
 def _read_geojson(path):
     data = json.loads(Path(path).read_text(encoding="utf-8"))
     crs_name = (data.get("crs") or {}).get("properties", {}).get("name")
     return data["features"], crs_name
-
-
+ 
+ 
 def load_geometries(path):
     """
     Returns {location_id: geometry} with every geometry in lat/long (WGS84), because browsers
@@ -147,13 +159,13 @@ def load_geometries(path):
         features, crs_text = _read_shapefile(path)
     else:
         features, crs_text = _read_geojson(path)
-
+ 
     sample = next(f["geometry"]["coordinates"] for f in features if f.get("geometry"))
     x, y = _first_coord(sample)[:2]
     convert = lambda px, py: (px, py)
     if abs(x) > 180 or abs(y) > 90:
         from pyproj import CRS, Transformer
-        source = CRS.from_epsg(2263)                  
+        source = CRS.from_epsg(2263)                   # the TLC default, used if the file does not say
         if crs_text:
             try:
                 source = CRS.from_user_input(crs_text)
@@ -161,7 +173,7 @@ def load_geometries(path):
                 pass
         convert = Transformer.from_crs(source, "EPSG:4326", always_xy=True).transform
         print(f"  zone boundaries are projected ({source.name}); converting to lat/long")
-
+ 
     geoms = {}
     for f in features:
         if not f.get("geometry"):
@@ -172,13 +184,14 @@ def load_geometries(path):
         if loc_id not in geoms:
             geoms[loc_id] = g
             continue
+        # Same zone appears twice (TLC splits a few zones): merge into one MultiPolygon
         old = geoms[loc_id]
         polys = old["coordinates"] if old["type"] == "MultiPolygon" else [old["coordinates"]]
         new = g["coordinates"] if g["type"] == "MultiPolygon" else [g["coordinates"]]
         geoms[loc_id] = {"type": "MultiPolygon", "coordinates": polys + new}
     return geoms
-
-
+ 
+ 
 def build_zones(lookup, geoms):
     zones = []
     for r in lookup.itertuples():
@@ -196,9 +209,31 @@ def build_zones(lookup, geoms):
     if extra:
         print(f"  note: polygons with no lookup row (ignored): {extra}")
     return zones
-
-def read_raw_trips(path):
-    """Read only the columns we need, so a multi-million-row month fits in memory. Accepts .parquet or .csv."""
+ 
+ 
+# ----------------------------------------------------------------------------
+# Trips
+# ----------------------------------------------------------------------------
+CSV_CHUNK = 500_000      # rows read at a time from a big CSV, so memory stays small
+ 
+ 
+def _count_rows(path):
+    """Count the lines of a big text file quickly (minus the header), without loading it."""
+    n = 0
+    with open(path, "rb") as f:
+        while True:
+            block = f.read(1 << 24)
+            if not block:
+                break
+            n += block.count(b"\n")
+    return max(n - 1, 0)
+ 
+ 
+def read_raw_trips(path, sample=0):
+    """
+    Read only the columns we need, so a multi-million-row month fits in memory. Accepts .parquet or .csv.
+    A big CSV is read in chunks and sampled chunk by chunk, so it never sits in memory whole.
+    """
     path = Path(path)
     wanted = set(RENAME)
     if path.suffix.lower() == ".parquet":
@@ -207,12 +242,22 @@ def read_raw_trips(path):
         return pd.read_parquet(path, columns=[n for n in names if n.strip().lower() in wanted])
     if path.suffix.lower() in (".csv", ".gz"):
         header = pd.read_csv(path, nrows=0).columns
-        return pd.read_csv(path, usecols=[c for c in header if c.strip().lower() in wanted])
+        cols = [c for c in header if c.strip().lower() in wanted]
+        if sample and path.suffix.lower() == ".csv":
+            print("  counting rows in the CSV...")
+            total = _count_rows(path)
+            frac = min(1.0, sample * 1.05 / max(total, 1))     # take a little extra, trimmed to the exact size later
+            print(f"  {total:,} rows in the file; reading in chunks and keeping about {frac * 100:.1f}% of them")
+            parts = []
+            for chunk in pd.read_csv(path, usecols=cols, chunksize=CSV_CHUNK):
+                parts.append(chunk if frac >= 1 else chunk.sample(frac=frac, random_state=42))
+            return pd.concat(parts)
+        return pd.read_csv(path, usecols=cols)
     raise SystemExit(f"Unsupported trips file type: {path.name} (use .parquet or .csv)")
-
-
+ 
+ 
 def load_trips(path, sample):
-    df = read_raw_trips(path)
+    df = read_raw_trips(path, sample)
     df.columns = [c.strip().lower() for c in df.columns]
     df = df.rename(columns=RENAME)
     missing = [c for c in CRITICAL if c not in df.columns]
@@ -228,35 +273,38 @@ def load_trips(path, sample):
             "trip_distance", "rate_code_id", "store_and_fwd_flag", "pu_location_id", "do_location_id",
             "payment_type_id", "fare_amount", *FEES, "total_amount"]
     return df[keep].reset_index(drop=True)
-
-
+ 
+ 
 def clean_trips(df, lookup):
     n_raw = len(df)
-
+ 
+    # --- 1. Normalise types so every later check compares like with like ---------
     df["pickup_datetime"] = pd.to_datetime(df["pickup_datetime"], errors="coerce")
     df["dropoff_datetime"] = pd.to_datetime(df["dropoff_datetime"], errors="coerce")
     numeric = ["vendor_id", "passenger_count", "trip_distance", "rate_code_id", "pu_location_id",
                "do_location_id", "payment_type_id", "fare_amount", "total_amount", *FEES]
     for col in numeric:
         df[col] = pd.to_numeric(df[col], errors="coerce")
-
+ 
     duration = (df["dropoff_datetime"] - df["pickup_datetime"]).dt.total_seconds() / 60
     with np.errstate(divide="ignore", invalid="ignore"):
         speed = df["trip_distance"] / (duration / 60)
-
+ 
+    # --- 2. Exclusion rules. A row gets the FIRST reason it matches. -------------
     reason = pd.Series("", index=df.index, dtype=object)
-
+ 
     def flag(mask, why):
         mask = mask & (reason == "")
         reason[mask] = why
-
+ 
     flag(df[CRITICAL].isna().any(axis=1), "missing_critical_value")
-
+ 
+    # Raw TLC files contain a few trips dated in other months/years (meter clock errors)
     month = df["pickup_datetime"].dt.to_period("M")
     main_month = month.mode().iloc[0]
     print(f"  main month in the file: {main_month}")
     flag(month != main_month, "pickup_outside_main_month")
-
+ 
     flag(duration <= 0, "dropoff_not_after_pickup")
     flag(duration < LIMITS["min_duration_min"], "duration_under_1_min")
     flag(duration > LIMITS["max_duration_min"], "duration_over_6_hours")
@@ -269,11 +317,13 @@ def clean_trips(df, lookup):
     known_zones = set(lookup["location_id"])
     flag(~df["pu_location_id"].isin(known_zones) | ~df["do_location_id"].isin(known_zones), "unknown_zone_id")
     flag(speed > LIMITS["max_speed_mph"], "impossible_speed")
-
+ 
+    # Duplicates are checked last, only among rows that survived everything above
     ok = reason == ""
     dup = df[ok].duplicated(subset=DUP_KEYS, keep="first")
     flag(df.index.isin(dup[dup].index), "duplicate_trip")
-
+ 
+    # --- 3. Transparency log of everything removed -------------------------------
     removed = df[reason != ""].copy()
     removed["reason"] = reason[reason != ""]
     for col in ("pickup_datetime", "dropoff_datetime"):
@@ -281,18 +331,19 @@ def clean_trips(df, lookup):
     log_cols = ["raw_row", "reason", "pickup_datetime", "dropoff_datetime", "pu_location_id",
                 "do_location_id", "trip_distance", "fare_amount", "total_amount"]
     excluded_log = removed[log_cols]
-
+ 
     summary = (excluded_log["reason"].value_counts().rename_axis("reason")
                .reset_index(name="record_count"))
-
+ 
+    # --- 4. Repairs: fix harmless gaps instead of throwing the trip away ---------
     kept = df[reason == ""].copy()
     repairs = {}
-
+ 
     def repair(mask, col, value, label):
         if int(mask.sum()):
             repairs[label] = int(mask.sum())
         kept.loc[mask, col] = value
-
+ 
     pc = kept["passenger_count"]
     repair(pc.isna() | (pc < 1) | (pc > LIMITS["max_passengers"]), "passenger_count", 1,
            "repaired_passenger_count_set_to_1")
@@ -302,24 +353,29 @@ def clean_trips(df, lookup):
     flagv = kept["store_and_fwd_flag"].astype(str).str.upper().str[:1]
     kept["store_and_fwd_flag"] = np.where(flagv == "Y", "Y", "N")
     kept[FEES] = kept[FEES].fillna(0)
-
-    kept["trip_duration_min"] = (kept["dropoff_datetime"] - kept["pickup_datetime"]).dt.total_seconds() / 60    
+ 
+    # --- 5. Feature engineering ---------------------------------------------------
+    kept["trip_duration_min"] = (kept["dropoff_datetime"] - kept["pickup_datetime"]).dt.total_seconds() / 60
+    # 1. average speed: shows congestion (needs distance AND duration)
     kept["avg_speed_mph"] = kept["trip_distance"] / (kept["trip_duration_min"] / 60)
+    # 2. fare per mile: shows how expensive a mile of movement is (needs fare AND distance)
     kept["fare_per_mile"] = kept["fare_amount"] / kept["trip_distance"]
+    # 3. tip percentage: only for card payments, because cash tips are never recorded
     card = kept["payment_type_id"] == 1
     kept["tip_pct"] = np.where(card, kept["tip_amount"] / kept["fare_amount"] * 100, np.nan)
+    # 4/5. time features, handy for grouping
     kept["pickup_hour"] = kept["pickup_datetime"].dt.hour
     kept["pickup_dow"] = kept["pickup_datetime"].dt.dayofweek          # 0 = Monday ... 6 = Sunday
     kept["is_weekend"] = (kept["pickup_dow"] >= 5).astype(int)
-
+    # 6. airport trip: pickup or dropoff zone is in the Airports/EWR service zone (needs the zone lookup)
     svc = lookup.set_index("location_id")["service_zone"]
     bor = lookup.set_index("location_id")["borough"]
     is_air = kept["pu_location_id"].map(svc).isin(["Airports", "EWR"]) | kept["do_location_id"].map(svc).isin(["Airports", "EWR"])
     kept["is_airport_trip"] = is_air.astype(int)
-   
+    # 7. cross-borough trip: pickup and dropoff are in different boroughs (needs the zone lookup)
     kept["is_cross_borough"] = (kept["pu_location_id"].map(bor) != kept["do_location_id"].map(bor)).astype(int)
-
  
+    # --- 6. Standardise formats for the database ---------------------------------
     kept = kept.sort_values("pickup_datetime").reset_index(drop=True)
     kept["trip_id"] = np.arange(1, len(kept) + 1)
     kept["pickup_date"] = kept["pickup_datetime"].dt.strftime("%Y-%m-%d")
@@ -332,12 +388,16 @@ def clean_trips(df, lookup):
                 "trip_duration_min", "avg_speed_mph", "fare_per_mile", "tip_pct"):
         kept[col] = kept[col].round(2)
     kept = kept[FINAL_COLUMNS]
+ 
+    # --- 7. Summary table (exclusions + repairs) ---------------------------------
     rep = pd.DataFrame({"reason": list(repairs), "record_count": list(repairs.values())})
     summary = pd.concat([summary, rep], ignore_index=True)
     summary["record_count"] = summary["record_count"].astype(int)
     summary["percent_of_raw"] = (summary["record_count"] / n_raw * 100).round(3)
     return kept, excluded_log, summary
-
+ 
+ 
+# ----------------------------------------------------------------------------
 def find_one(patterns, label):
     for pattern in patterns:
         matches = sorted(RAW.glob(pattern))
@@ -345,8 +405,8 @@ def find_one(patterns, label):
             return matches[0]
     raise SystemExit(f"Could not find {label} in {RAW} (looked for {', '.join(patterns)}). "
                      f"Put the file there, or point to it with the matching --option.")
-
-
+ 
+ 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser(description="Clean the NYC taxi data.")
     ap.add_argument("--trips", help="path to the yellow_tripdata .parquet (or .csv) file")
@@ -354,32 +414,33 @@ if __name__ == "__main__":
     ap.add_argument("--zones", help="path to taxi_zones.zip (shapefile) or a zones .geojson")
     ap.add_argument("--sample", type=int, default=0, help="only use this many random trips (for fast testing)")
     args = ap.parse_args()
-
+ 
     trips_path = Path(args.trips) if args.trips else find_one(["yellow_tripdata*.parquet", "yellow_tripdata*.csv"], "the trips file")
     lookup_path = Path(args.lookup) if args.lookup else find_one(["taxi_zone_lookup*.csv"], "the zone lookup CSV")
     zones_path = Path(args.zones) if args.zones else find_one(["taxi_zones*.zip", "taxi_zones*.shp", "taxi_zones*.geojson"], "the taxi zones file")
     OUT.mkdir(parents=True, exist_ok=True)
-
+ 
     print(f"Trips : {trips_path.name}\nLookup: {lookup_path.name}\nZones : {zones_path.name}")
-
+ 
     print("\n[1/3] Zones")
     lookup = load_lookup(lookup_path)
     zones = build_zones(lookup, load_geometries(zones_path))
     (OUT / "zones.json").write_text(json.dumps(zones), encoding="utf-8")
     print(f"  {len(zones)} zones written")
-
+ 
     print("\n[2/3] Trips")
     raw = load_trips(trips_path, args.sample)
     print(f"  {len(raw):,} raw trips loaded")
     clean, excluded, summary = clean_trips(raw, lookup)
-
+ 
     print("\n[3/3] Writing files")
     clean.to_parquet(OUT / "trips_clean.parquet", index=False)
     excluded.to_csv(OUT / "excluded_trips.csv", index=False)
     summary.to_csv(OUT / "exclusion_summary.csv", index=False)
-
+ 
     print(f"\n  kept     : {len(clean):,}")
     print(f"  excluded : {len(excluded):,}  ({len(excluded) / len(raw) * 100:.2f}% of raw)")
     print("\nWhy trips were excluded / repaired:")
     print(summary.to_string(index=False))
     print(f"\nFiles saved in {OUT}")
+ 

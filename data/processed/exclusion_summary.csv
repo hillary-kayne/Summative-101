@@ -1,0 +1,11 @@
+reason,record_count,percent_of_raw
+duration_under_1_min,1774,0.887
+duration_over_6_hours,504,0.252
+distance_zero_or_negative,308,0.154
+dropoff_not_after_pickup,166,0.083
+fare_zero_or_negative,153,0.076
+pickup_outside_main_month,17,0.008
+impossible_speed,7,0.003
+distance_over_100_miles,1,0.0
+negative_fee_component,1,0.0
+repaired_passenger_count_set_to_1,2928,1.464

@@ -1,0 +1,8 @@
+# Python generated files
+__pycache__/
+*.py[cod]
+
+# Generated local database
+Database/nyc_taxi.db
+
+data/raw/yellow_tripdata_2019-01 (1).csv
