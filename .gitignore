@@ -6,3 +6,4 @@ __pycache__/
 Database/nyc_taxi.db
 
 data/raw/yellow_tripdata_2019-01 (1).csv
+.vscode
