@@ -256,8 +256,7 @@ Features:
 | Port 5000 is already in use | Start on another port. In PowerShell: `$env:PORT=5001; python Backend/app.py` |
 | Dashboard shows an error banner | Make sure the server is running and the database has been built |
 
-# Demo video:
-# Documentation: 
+# Demo video: https://youtu.be/ElIgVyGplSk
 
 
 ## Data sources
